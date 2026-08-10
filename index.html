@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b6b57">
+<link rel="manifest" href="manifest.webmanifest">
+<title>Park4Night ID v3</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f4f6f5;color:#17201d;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:600px;margin:auto;padding:20px 15px 40px}.card{background:#fff;border-radius:20px;padding:19px;margin-bottom:15px;box-shadow:0 4px 18px #0001}
+h1{font-size:25px;margin:0 0 6px}h2{font-size:18px;margin:0 0 10px}p{color:#5b6762;line-height:1.4}
+input,select{width:100%;font-size:17px;padding:13px;border:1px solid #cbd5d1;border-radius:12px;background:#fff;margin:6px 0 9px}
+button{width:100%;padding:13px;border:0;border-radius:12px;background:#0b6b57;color:white;font-size:16px;font-weight:700;margin-top:7px}
+button.secondary{background:#e7eeeb;color:#174b40}.status{margin:9px 0;font-size:14px}.ok{color:#087653}.err{color:#a52b2b}
+.item{border:1px solid #dce5e1;border-radius:15px;padding:14px;margin-top:10px;background:#fbfdfc}
+.rank{font-size:14px;font-weight:800;color:#60706a}.name{font-size:18px;font-weight:800;margin:2px 0}.loc{color:#5c6763;font-size:14px}.score{font-size:22px;font-weight:850;margin:7px 0}.meta{font-size:13px;color:#6a746f}
+.actions{display:flex;gap:8px}.actions button{flex:1}
+.small{font-size:12px;color:#69746f}
+</style>
+</head>
+<body>
+<main>
+<div class="card">
+<h1>🔎 Park4Night ID</h1>
+<p>Busca un área por nombre y muestra las coincidencias cercanas ordenadas por puntuación.</p>
+<input id="q" placeholder="Ej.: Área de Barbantes" autocomplete="off">
+<label class="small">Ordenar por</label>
+<select id="sort">
+<option value="rating">⭐ Puntuación (mayor primero)</option>
+<option value="weighted">⭐ Puntuación + opiniones</option>
+<option value="reviews">💬 Número de opiniones</option>
+<option value="distance">📍 Distancia</option>
+</select>
+<button onclick="search()">Buscar áreas</button>
+<div id="status" class="status"></div>
+<div id="results"></div>
+</div>
+
+<div class="card">
+<h2>🔗 Obtener ID desde una URL</h2>
+<input id="url" placeholder="https://park4night.com/es/place/40451">
+<button onclick="extract()">Extraer ID</button>
+<div id="urlresult"></div>
+</div>
+
+<div class="card">
+<p class="small"><b>Nota:</b> la búsqueda avanzada utiliza geocodificación de OpenStreetMap y una API pública no oficial de Park4Night. No descarga la base completa. Si el servicio externo cambia o bloquea consultas desde navegador, la búsqueda por nombre puede dejar de funcionar; la extracción de ID desde URL seguirá funcionando.</p>
+</div>
+</main>
+<script>
+const P4N='https://guest.park4night.com/services/V4.1/lieuxGetFilter.php';
+const NOM='https://nominatim.openstreetmap.org/search';
+const re=/park4night\.com\/(?:[a-z]{2}\/)?place\/(\d+)/i;
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function setStatus(t,ok=false){const x=document.getElementById('status');x.textContent=t;x.className='status '+(ok?'ok':'err')}
+function rating(x){let n=parseFloat(x?.note_moyenne);return Number.isFinite(n)?n:0}
+function reviews(x){let n=parseInt(x?.nb_commentaires);return Number.isFinite(n)?n:0}
+function distance(x){let n=parseFloat(x?.distance);return Number.isFinite(n)?n:999999}
+function matchScore(x,q){
+ const hay=((x.name||'')+' '+(x.titre||'')+' '+(x.ville||'')+' '+(x.route||'')).toLowerCase();
+ const tokens=q.toLowerCase().split(/\s+/).filter(Boolean);
+ return tokens.reduce((s,t)=>s+(hay.includes(t)?1:0),0);
+}
+function weighted(x){
+ const r=rating(x), n=reviews(x);
+ return n? r*(1-Math.exp(-n/40)):0;
+}
+async function search(){
+ const q=document.getElementById('q').value.trim(); if(!q)return;
+ const out=document.getElementById('results'); out.innerHTML=''; setStatus('Buscando la ubicación…',true);
+ try{
+   const u=NOM+'?format=jsonv2&limit=1&accept-language=es&q='+encodeURIComponent(q);
+   const geo=await fetch(u).then(r=>{if(!r.ok)throw Error('geocodificación');return r.json()});
+   if(!geo.length)throw Error('No he encontrado esa ubicación');
+   const lat=geo[0].lat, lon=geo[0].lon;
+   setStatus('Consultando Park4Night alrededor de '+(geo[0].display_name||q)+'…',true);
+   const p=P4N+'?latitude='+encodeURIComponent(lat)+'&longitude='+encodeURIComponent(lon);
+   const data=await fetch(p).then(r=>{if(!r.ok)throw Error('Park4Night');return r.json()});
+   let arr=Array.isArray(data)?data:(data.places||data.lieux||data.data||[]);
+   if(!Array.isArray(arr)) throw Error('Formato de datos no reconocido');
+   arr=arr.map(x=>({...x,_match:matchScore(x,q)})).filter(x=>x._match>0 || distance(x)<3);
+   const mode=document.getElementById('sort').value;
+   arr.sort((a,b)=>{
+     if(mode==='weighted') return weighted(b)-weighted(a) || reviews(b)-reviews(a);
+     if(mode==='reviews') return reviews(b)-reviews(a) || rating(b)-rating(a);
+     if(mode==='distance') return distance(a)-distance(b) || rating(b)-rating(a);
+     return rating(b)-rating(a) || reviews(b)-reviews(a);
+   });
+   arr=arr.slice(0,30);
+   if(!arr.length){out.innerHTML='<div class="item">No he encontrado fichas cercanas que coincidan. Prueba con solo el nombre del lugar, por ejemplo <b>Barbantes</b>.</div>';setStatus('Sin resultados.');return}
+   out.innerHTML=arr.map((x,i)=>{
+     const id=x.id||x.lieu_id||x.place_id;
+     const r=rating(x), n=reviews(x), d=distance(x);
+     const title=x.name||x.titre||'Sin nombre', loc=[x.ville,x.pays].filter(Boolean).join(', ');
+     return `<div class="item"><div class="rank">#${i+1}</div><div class="name">${esc(title)}</div><div class="loc">${esc(loc)}</div><div class="score">⭐ ${r?r.toFixed(2):'—'}/5</div><div class="meta">💬 ${n} opiniones${d<999?' · 📍 '+d.toFixed(1)+' km':''} · 🆔 ${id?'#'+esc(id):'—'}</div>${id?`<div class="actions"><button onclick="copyId('${esc(id)}')">📋 Copiar ID</button><button class="secondary" onclick="location.href='https://park4night.com/es/place/${esc(id)}'">🔗 Abrir</button></div>`:''}</div>`;
+   }).join('');
+   setStatus(arr.length+' resultados encontrados.',true);
+ }catch(e){
+   console.error(e);
+   out.innerHTML='<div class="item"><b>No se pudo realizar la búsqueda automática.</b><br>Comprueba la conexión y prueba con un nombre sencillo, como “Barbantes”.<br><br>Puedes seguir usando la extracción de ID pegando una URL.</div>';
+   setStatus('El servicio de búsqueda no ha respondido.');
+ }
+}
+function extract(){
+ const t=document.getElementById('url').value.trim(),m=t.match(re),box=document.getElementById('urlresult');
+ if(!m){box.innerHTML='<div class="item">No encuentro un ID en esa URL.</div>';return}
+ const id=m[1];
+ box.innerHTML=`<div class="item"><div class="score">🆔 #${id}</div><button onclick="copyId('${id}')">📋 Copiar ID</button><button class="secondary" onclick="location.href='https://park4night.com/es/place/${id}'">🔗 Abrir ficha</button></div>`;
+}
+async function copyId(id){try{await navigator.clipboard.writeText(id);setStatus('ID copiado: #'+id,true)}catch(e){alert('ID: '+id)}}
+</script>
+</body>
+</html>
