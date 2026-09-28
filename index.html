@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1f2937">
+<meta name="description" content="ID Camper: consulta independiente de identificadores de áreas camper.">
+<link rel="manifest" href="manifest.webmanifest">
+<title>ID Camper</title>
+<style>
+:root{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#172033;background:#f4f6f8}
+*{box-sizing:border-box}body{margin:0}.wrap{max-width:720px;margin:auto;padding:18px 14px 40px}
+header{background:#1f2937;color:#fff;border-radius:18px;padding:20px;margin-bottom:14px;box-shadow:0 4px 16px #0001}
+h1{margin:0 0 5px;font-size:29px}.sub{opacity:.82;font-size:14px}.independent{margin-top:12px;font-size:12px;background:#ffffff18;border:1px solid #ffffff25;padding:8px 10px;border-radius:10px}
+.card{background:#fff;border-radius:16px;padding:16px;margin:12px 0;box-shadow:0 2px 10px #0000000b;border:1px solid #e7eaf0}
+h2{font-size:18px;margin:0 0 12px}.hint{font-size:13px;color:#667085;line-height:1.45}
+label{display:block;font-size:13px;font-weight:650;margin:12px 0 6px}input,select,button{font:inherit}input,select{width:100%;padding:12px;border:1px solid #ccd2da;border-radius:11px;background:#fff}button{border:0;border-radius:11px;padding:12px 15px;font-weight:700;cursor:pointer}.primary{background:#1f2937;color:#fff}.secondary{background:#eef1f5;color:#172033}.row{display:flex;gap:8px;align-items:end}.row>div{flex:1}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.status{margin-top:12px;padding:10px;border-radius:10px;background:#f1f5f9;font-size:13px}.error{background:#fff1f2;color:#9f1239}.ok{background:#ecfdf3;color:#166534}
+.result{padding:13px 0;border-top:1px solid #edf0f3}.result:first-child{border-top:0}.name{font-weight:750;font-size:16px}.meta{font-size:13px;color:#596273;margin-top:4px;line-height:1.5}.id{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:700}.result-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}.small{padding:8px 10px;font-size:13px}
+footer{font-size:11px;color:#697386;line-height:1.5;text-align:center;margin:18px 8px}.privacy{white-space:pre-line}.hidden{display:none}
+@media(max-width:500px){.row{flex-direction:column;align-items:stretch}.row>div{width:100%}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+<h1>ID Camper</h1>
+<div class="sub">Consulta de identificadores de áreas camper</div>
+<div class="independent">Herramienta independiente · No afiliada a Park4Night</div>
+</header>
+
+<section class="card">
+<h2>🆔 Obtener ID desde una URL</h2>
+<div class="hint">Pega la URL de un área. La extracción del identificador se realiza localmente en tu dispositivo.</div>
+<label for="url">URL del área</label>
+<input id="url" placeholder="https://park4night.com/es/place/123456">
+<div class="actions"><button class="primary" id="extract">Extraer ID</button><button class="secondary" id="openUrl">Abrir URL</button></div>
+<div id="idResult" class="status hidden"></div>
+</section>
+
+<section class="card">
+<h2>🔎 Buscar área por nombre</h2>
+<div class="hint">Escribe un nombre como “Área de Barbantes”. Se localiza el lugar y se consultan las áreas cercanas.</div>
+<label for="query">Nombre o localidad</label>
+<input id="query" placeholder="Área de Barbantes">
+<div class="row">
+<div><label for="radius">Radio</label><select id="radius"><option value="10">10 km</option><option value="25" selected>25 km</option><option value="50">50 km</option></select></div>
+<div><label for="sort">Ordenar</label><select id="sort"><option value="rating" selected>Puntuación</option><option value="reviews">Opiniones</option><option value="distance">Distancia</option><option value="name">Nombre</option></select></div>
+</div>
+<div class="actions"><button class="primary" id="search">Buscar áreas</button></div>
+<div id="searchStatus" class="status hidden"></div>
+<div id="results"></div>
+</section>
+
+<section class="card">
+<h2>🔒 Privacidad</h2>
+<div class="hint privacy">ID Camper no solicita ni almacena cuentas, contraseñas ni datos personales.
+
+La extracción de un ID a partir de una URL se realiza localmente en el dispositivo.
+
+Las búsquedas de lugares utilizan servicios externos para geocodificación y consulta de áreas. Las solicitudes pueden quedar registradas por esos proveedores conforme a sus propias políticas de privacidad.
+
+ID Camper no se presenta como una aplicación oficial ni está afiliada a Park4Night.</div>
+</section>
+
+<footer>ID Camper · herramienta independiente para consulta de identificadores de áreas camper</footer>
+</div>
+<script>
+const CONFIG={
+  // Después de desplegar el Worker, sustituye esta URL por la URL que te indique Cloudflare.
+  API_BASE:'https://idcamper-api.xa-ca.workers.dev'
+};
+
+const $=id=>document.getElementById(id);
+function setStatus(el,msg,type=''){el.textContent=msg;el.className='status '+type;el.classList.remove('hidden')}
+function extractId(value){
+  try{
+    const u=new URL(value.trim());
+    const p=u.pathname.split('/').filter(Boolean);
+    const patterns=[/^(?:place|lieu|area|aire)$/i];
+    for(let i=0;i<p.length-1;i++) if(patterns.some(r=>r.test(p[i])) && /^\d+$/.test(p[i+1])) return p[i+1];
+    for(const key of ['id','place_id','placeId']){const v=u.searchParams.get(key);if(v&&/^\d+$/.test(v))return v}
+    const nums=p.filter(x=>/^\d+$/.test(x)); if(nums.length) return nums[nums.length-1];
+  }catch(e){}
+  const m=String(value).match(/(?:place|lieu|area|aire)[\/_-](\d{3,})/i); return m?m[1]:null;
+}
+$('extract').onclick=()=>{
+  const id=extractId($('url').value);
+  if(id)setStatus($('idResult'),'ID encontrado: '+id,'ok');
+  else setStatus($('idResult'),'No he encontrado un ID numérico en esa URL.','error');
+};
+$('openUrl').onclick=()=>{const v=$('url').value.trim();if(/^https?:\/\//i.test(v))window.open(v,'_blank');else setStatus($('idResult'),'Introduce una URL válida.','error')};
+
+function haversine(a,b,c,d){const R=6371,rad=x=>x*Math.PI/180,da=rad(c-a),db=rad(d-b),x=Math.sin(da/2)**2+Math.cos(rad(a))*Math.cos(rad(c))*Math.sin(db/2)**2;return 2*R*Math.asin(Math.sqrt(x))}
+function num(v){const n=Number(v);return Number.isFinite(n)?n:0}
+function normalizePlaces(data){
+  let arr=[];
+  const visit=o=>{
+    if(!o||typeof o!=='object')return;
+    if(Array.isArray(o)){o.forEach(visit);return}
+    const id=o.id??o.place_id??o.placeId;
+    const lat=o.lat??o.latitude??o.location?.lat;
+    const lng=o.lng??o.lon??o.longitude??o.location?.lng;
+    const title=o.title_short??o.title??o.name??o.label;
+    if(id!=null && title && lat!=null && lng!=null){arr.push({id:String(id),title:String(title),lat:num(lat),lng:num(lng),rating:num(o.rating??o.note??o.score),reviews:num(o.review??o.reviews??o.review_count??o.reviewCount),city:o.city??o.address?.city??'',country:o.country??o.address?.country??'',url:o.url??o.link??''})}
+    Object.entries(o).forEach(([k,v])=>{if(['address','location'].includes(k))return; if(v&&typeof v==='object')visit(v)})
+  };
+  visit(data);
+  const seen=new Set();return arr.filter(x=>{if(seen.has(x.id))return false;seen.add(x.id);return true});
+}
+async function api(path){
+  if(CONFIG.API_BASE.includes('REEMPLAZAR'))throw new Error('Falta configurar el servicio de consulta.');
+  const r=await fetch(CONFIG.API_BASE+path,{headers:{'Accept':'application/json'}}); if(!r.ok)throw new Error('HTTP '+r.status); return r.json();
+}
+$('search').onclick=async()=>{
+  const q=$('query').value.trim(); if(!q){setStatus($('searchStatus'),'Escribe el nombre de un área o localidad.','error');return}
+  const results=$('results');results.innerHTML='';setStatus($('searchStatus'),'Buscando…');
+  try{
+    const geo=await api('/geocode?q='+encodeURIComponent(q));
+    if(!geo?.length)throw new Error('No he encontrado esa localidad.');
+    const g=geo[0];
+    const radius=Number($('radius').value);
+    const data=await api('/places?lat='+encodeURIComponent(g.lat)+'&lng='+encodeURIComponent(g.lon)+'&radius='+radius);
+    let places=normalizePlaces(data).map(p=>({...p,distance:haversine(num(g.lat),num(g.lon),p.lat,p.lng)}));
+    const tokens=q.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(x=>x.length>2);
+    const filtered=places.filter(p=>tokens.some(t=>(p.title+' '+p.city).toLowerCase().includes(t)));
+    if(filtered.length)places=filtered;
+    const sort=$('sort').value;
+    places.sort((a,b)=>sort==='reviews'?b.reviews-a.reviews:sort==='distance'?a.distance-b.distance:sort==='name'?a.title.localeCompare(b.title,'es'):b.rating-a.rating||b.reviews-a.reviews);
+    places=places.slice(0,30);
+    setStatus($('searchStatus'),`${places.length} resultado(s) cerca de ${g.display_name||q}.`,'ok');
+    if(!places.length){results.innerHTML='<div class="hint" style="padding-top:12px">No se han encontrado áreas en ese radio.</div>';return}
+    results.innerHTML=places.map(p=>{
+      const direct=p.url||('https://park4night.com/es/place/'+encodeURIComponent(p.id));
+      return `<div class="result"><div class="name">${esc(p.title)}</div><div class="meta">ID <span class="id">${esc(p.id)}</span> · ⭐ ${p.rating?p.rating.toFixed(1):'—'} · ${p.reviews||0} opiniones · ${p.distance.toFixed(1)} km${p.city?' · '+esc(p.city):''}</div><div class="result-actions"><button class="secondary small" data-copy="${escAttr(p.id)}">Copiar ID</button><button class="secondary small" data-open="${escAttr(direct)}">Abrir área</button></div></div>`;
+    }).join('');
+    results.querySelectorAll('[data-copy]').forEach(b=>b.onclick=async()=>{await navigator.clipboard.writeText(b.dataset.copy);b.textContent='Copiado ✓';setTimeout(()=>b.textContent='Copiar ID',1200)});
+    results.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>window.open(b.dataset.open,'_blank'));
+  }catch(e){setStatus($('searchStatus'),e.message.includes('Falta configurar')?'La búsqueda todavía necesita configurar el pequeño servicio privado de consulta.':e.message||'El servicio de búsqueda no ha respondido.','error')}
+};
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function escAttr(s){return esc(s)}
+if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js?v=3.2'));
+</script>
+</body>
+</html>
